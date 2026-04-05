@@ -1,0 +1,10 @@
+[package]
+name = "lccp"
+version = "0.0.0"
+edition = "2021"
+description = "Lobster Configuration and Command-Line Parsing (LCCP)"
+license = "UNLICENSED"
+repository = "https://github.com/lobbyseago/lccp-rust"
+
+[lib]
+path = "src/lib.rs"
