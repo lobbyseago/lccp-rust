@@ -1,0 +1,95 @@
+Input Files:
+examples/example-app/system/example-app.json
+{"server":{"host":"system-json.example"}}
+
+examples/example-app/system/example-app.toml
+[server]
+host = "system-toml.example"
+
+examples/example-app/install-root/etc/example-app.toml
+[server]
+host = "install.example"
+
+examples/example-app/home/.config/example-app/config.toml
+[server]
+host = "user.example"
+
+examples/example-app/cwd/example-app.json
+{"server":{"host":"cwd.example"}}
+
+examples/example-app/cwd/cli-config.toml
+[server]
+host = "cli-config.example"
+
+Environment:
+EXAMPLE_APP_SERVER_HOST=env.example
+
+CLI:
+example-app --config cli-config.toml --set server.host=set.example --server-host explicit.example --ports 7 --ports 8
+
+Warnings:
+- Both discovered configuration files exist at level 2: examples/example-app/system/example-app.json and examples/example-app/system/example-app.toml. TOML overrides JSON at this level.
+
+Default Config:
+ports = [
+    1,
+    2,
+]
+
+[features]
+enable_cache = false
+
+[logging]
+level = "warn"
+
+[server]
+host = "default.example"
+port = 80
+
+Resolved Config:
+ports = [
+    7,
+    8,
+]
+
+[features]
+enable_cache = false
+
+[logging]
+level = "warn"
+
+[server]
+host = "explicit.example"
+port = 80
+
+Debug Output:
+features.enable_cache = false
+  final_source: default @ default[features.enable_cache] (level 1)
+  override_history:
+    1. default @ default[features.enable_cache] => false
+logging.level = "warn"
+  final_source: default @ default[logging.level] (level 1)
+  override_history:
+    1. default @ default[logging.level] => "warn"
+ports = [7,8]
+  final_source: cli_explicit @ arguments 8, 10 of argv (level 9)
+  override_history:
+    1. default @ default[ports] => [1,2]
+    2. cli_explicit @ arguments 8, 10 of argv => [7,8]
+server.host = "explicit.example"
+  final_source: cli_explicit @ argument 6 of argv (level 9)
+  override_history:
+    1. default @ default[server.host] => "default.example"
+    2. system_file @ examples/example-app/system/example-app.json => "system-json.example"
+    3. system_file @ examples/example-app/system/example-app.toml => "system-toml.example"
+    4. install_file @ examples/example-app/install-root/etc/example-app.toml => "install.example"
+    5. user_file @ examples/example-app/home/.config/example-app/config.toml => "user.example"
+    6. working_dir_file @ examples/example-app/cwd/example-app.json => "cwd.example"
+    7. environment @ EXAMPLE_APP_SERVER_HOST => "env.example"
+    8. cli_config_file @ examples/example-app/cwd/cli-config.toml => "cli-config.example"
+    9. cli_set @ argument 4 of argv => "set.example"
+    10. cli_explicit @ argument 6 of argv => "explicit.example"
+server.port = 80
+  final_source: default @ default[server.port] (level 1)
+  override_history:
+    1. default @ default[server.port] => 80

@@ -1,10 +1,19 @@
 [package]
 name = "lccp"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2021"
 description = "Lobster Configuration and Command-Line Parsing (LCCP)"
-license = "UNLICENSED"
+readme = "README.md"
+license = "MIT"
 repository = "https://github.com/lobbyseago/lccp-rust"
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+serde_json = "1.0"
+thiserror = "1.0"
+toml = "0.8"
+
+[dev-dependencies]
+tempfile = "3.10"
