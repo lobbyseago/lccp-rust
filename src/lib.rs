@@ -1,3 +1,23 @@
+//! Rust implementation of Lobster Configuration and Command-Line Parsing (LCCP).
+//!
+//! This crate combines two concerns in one parser:
+//!
+//! - LCCP configuration resolution across defaults, files, environment, and CLI overrides
+//! - application-specific command-line parsing for flags, positionals, subcommands, and help text
+//!
+//! The main entry point is [`Resolver`].
+//!
+//! Typical usage:
+//!
+//! 1. construct a [`Resolver`]
+//! 2. declare LCCP configuration options with [`OptionSpec`]
+//! 3. register default values
+//! 4. configure app CLI structure through [`CommandSpec`], [`CliOptionSpec`], and [`PositionalSpec`]
+//! 5. call [`Resolver::resolve`] or [`Resolver::resolve_with`]
+//! 6. read resolved config plus parsed command matches from [`ResolvedConfig`]
+//!
+//! A concise Rust-facing API guide is also checked in at `docs/api.md` in the repository.
+//!
 use std::collections::BTreeMap;
 use std::env;
 use std::fmt;
@@ -41,6 +61,8 @@ pub struct OptionSpec {
     value_type: ValueType,
     repeated_cli: bool,
     long_flag: String,
+    help: Option<String>,
+    value_name: Option<String>,
 }
 
 impl OptionSpec {
@@ -53,6 +75,8 @@ impl OptionSpec {
             key,
             value_type,
             repeated_cli: false,
+            help: None,
+            value_name: None,
         })
     }
 
@@ -65,7 +89,19 @@ impl OptionSpec {
             key,
             value_type: ValueType::Array(Box::new(element_type)),
             repeated_cli: true,
+            help: None,
+            value_name: None,
         })
+    }
+
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
+    }
+
+    pub fn with_value_name(mut self, value_name: impl Into<String>) -> Self {
+        self.value_name = Some(value_name.into());
+        self
     }
 
     pub fn key(&self) -> &str {
@@ -82,6 +118,323 @@ impl OptionSpec {
 
     pub fn repeated_cli(&self) -> bool {
         self.repeated_cli
+    }
+
+    pub fn help(&self) -> Option<&str> {
+        self.help.as_deref()
+    }
+
+    pub fn value_name(&self) -> Option<&str> {
+        self.value_name.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliOptionSpec {
+    name: String,
+    long_flag: String,
+    value_type: ValueType,
+    repeated: bool,
+    required: bool,
+    help: Option<String>,
+    value_name: Option<String>,
+}
+
+impl CliOptionSpec {
+    pub fn new(
+        name: impl Into<String>,
+        long_flag: impl Into<String>,
+        value_type: ValueType,
+    ) -> Result<Self, LccpError> {
+        let name = name.into();
+        let long_flag = long_flag.into();
+        validate_argument_name(&name)?;
+        validate_long_flag(&long_flag)?;
+
+        Ok(Self {
+            name,
+            long_flag,
+            value_type,
+            repeated: false,
+            required: false,
+            help: None,
+            value_name: None,
+        })
+    }
+
+    pub fn repeated(
+        name: impl Into<String>,
+        long_flag: impl Into<String>,
+        element_type: ValueType,
+    ) -> Result<Self, LccpError> {
+        let name = name.into();
+        let long_flag = long_flag.into();
+        validate_argument_name(&name)?;
+        validate_long_flag(&long_flag)?;
+
+        Ok(Self {
+            name,
+            long_flag,
+            value_type: ValueType::Array(Box::new(element_type)),
+            repeated: true,
+            required: false,
+            help: None,
+            value_name: None,
+        })
+    }
+
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
+    }
+
+    pub fn with_value_name(mut self, value_name: impl Into<String>) -> Self {
+        self.value_name = Some(value_name.into());
+        self
+    }
+
+    pub fn required(mut self, required: bool) -> Self {
+        self.required = required;
+        self
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn long_flag(&self) -> &str {
+        &self.long_flag
+    }
+
+    pub fn value_type(&self) -> &ValueType {
+        &self.value_type
+    }
+
+    pub fn repeated_values(&self) -> bool {
+        self.repeated
+    }
+
+    pub fn required_option(&self) -> bool {
+        self.required
+    }
+
+    pub fn help(&self) -> Option<&str> {
+        self.help.as_deref()
+    }
+
+    pub fn value_name(&self) -> Option<&str> {
+        self.value_name.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PositionalSpec {
+    name: String,
+    value_type: ValueType,
+    required: bool,
+    multiple: bool,
+    help: Option<String>,
+}
+
+impl PositionalSpec {
+    pub fn new(name: impl Into<String>, value_type: ValueType) -> Result<Self, LccpError> {
+        let name = name.into();
+        validate_argument_name(&name)?;
+
+        Ok(Self {
+            name,
+            value_type,
+            required: true,
+            multiple: false,
+            help: None,
+        })
+    }
+
+    pub fn optional(mut self) -> Self {
+        self.required = false;
+        self
+    }
+
+    pub fn multiple(mut self) -> Self {
+        self.multiple = true;
+        self
+    }
+
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn value_type(&self) -> &ValueType {
+        &self.value_type
+    }
+
+    pub fn required(&self) -> bool {
+        self.required
+    }
+
+    pub fn multiple_values(&self) -> bool {
+        self.multiple
+    }
+
+    pub fn help(&self) -> Option<&str> {
+        self.help.as_deref()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandSpec {
+    name: String,
+    help: Option<String>,
+    options: BTreeMap<String, CliOptionSpec>,
+    flag_index: BTreeMap<String, String>,
+    positionals: Vec<PositionalSpec>,
+    subcommands: BTreeMap<String, CommandSpec>,
+}
+
+impl CommandSpec {
+    pub fn new(name: impl Into<String>) -> Result<Self, LccpError> {
+        let name = name.into();
+        validate_command_name(&name)?;
+
+        Ok(Self {
+            name,
+            help: None,
+            options: BTreeMap::new(),
+            flag_index: BTreeMap::new(),
+            positionals: Vec::new(),
+            subcommands: BTreeMap::new(),
+        })
+    }
+
+    pub fn with_help(mut self, help: impl Into<String>) -> Self {
+        self.help = Some(help.into());
+        self
+    }
+
+    pub fn add_option(&mut self, spec: CliOptionSpec) -> Result<(), LccpError> {
+        if self.options.contains_key(spec.name()) {
+            return Err(LccpError::DuplicateCliOption(spec.name().to_string()));
+        }
+        if self.flag_index.contains_key(spec.long_flag()) {
+            return Err(LccpError::DuplicateFlag(spec.long_flag().to_string()));
+        }
+
+        self.flag_index
+            .insert(spec.long_flag().to_string(), spec.name().to_string());
+        self.options.insert(spec.name().to_string(), spec);
+        Ok(())
+    }
+
+    pub fn add_positional(&mut self, spec: PositionalSpec) -> Result<(), LccpError> {
+        if self
+            .positionals
+            .iter()
+            .any(|existing| existing.name() == spec.name())
+        {
+            return Err(LccpError::DuplicatePositional(spec.name().to_string()));
+        }
+        if self.positionals.iter().any(PositionalSpec::multiple_values) {
+            return Err(LccpError::InvalidPositionalLayout(self.name.clone()));
+        }
+        self.positionals.push(spec);
+        Ok(())
+    }
+
+    pub fn add_subcommand(&mut self, spec: CommandSpec) -> Result<(), LccpError> {
+        if self.subcommands.contains_key(&spec.name) {
+            return Err(LccpError::DuplicateSubcommand(spec.name.clone()));
+        }
+        self.subcommands.insert(spec.name.clone(), spec);
+        Ok(())
+    }
+
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn help(&self) -> Option<&str> {
+        self.help.as_deref()
+    }
+
+    pub fn options(&self) -> &BTreeMap<String, CliOptionSpec> {
+        &self.options
+    }
+
+    pub fn positionals(&self) -> &[PositionalSpec] {
+        &self.positionals
+    }
+
+    pub fn subcommands(&self) -> &BTreeMap<String, CommandSpec> {
+        &self.subcommands
+    }
+
+    pub fn subcommand(&self, name: &str) -> Option<&CommandSpec> {
+        self.subcommands.get(name)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct CommandMatches {
+    command_name: String,
+    options: BTreeMap<String, Value>,
+    positionals: BTreeMap<String, Value>,
+    subcommand: Option<Box<CommandMatches>>,
+    help_requested: bool,
+}
+
+impl CommandMatches {
+    fn new(command_name: impl Into<String>) -> Self {
+        Self {
+            command_name: command_name.into(),
+            options: BTreeMap::new(),
+            positionals: BTreeMap::new(),
+            subcommand: None,
+            help_requested: false,
+        }
+    }
+
+    pub fn command_name(&self) -> &str {
+        &self.command_name
+    }
+
+    pub fn option(&self, name: &str) -> Option<&Value> {
+        self.options.get(name)
+    }
+
+    pub fn positional(&self, name: &str) -> Option<&Value> {
+        self.positionals.get(name)
+    }
+
+    pub fn options(&self) -> &BTreeMap<String, Value> {
+        &self.options
+    }
+
+    pub fn positionals(&self) -> &BTreeMap<String, Value> {
+        &self.positionals
+    }
+
+    pub fn subcommand(&self) -> Option<&CommandMatches> {
+        self.subcommand.as_deref()
+    }
+
+    pub fn help_requested(&self) -> bool {
+        self.help_requested
+    }
+
+    pub fn help_command_path(&self) -> Option<Vec<String>> {
+        if self.help_requested {
+            return Some(vec![self.command_name.clone()]);
+        }
+
+        let nested = self.subcommand.as_deref()?.help_command_path()?;
+        let mut path = vec![self.command_name.clone()];
+        path.extend(nested);
+        Some(path)
     }
 }
 
@@ -157,11 +510,12 @@ struct ResolvedEntry {
     history: Vec<OverrideRecord>,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ResolvedConfig {
     entries: BTreeMap<String, ResolvedEntry>,
     warnings: Vec<String>,
     standard_flags: StandardFlags,
+    command_matches: CommandMatches,
 }
 
 impl ResolvedConfig {
@@ -201,6 +555,10 @@ impl ResolvedConfig {
 
     pub fn standard_flags(&self) -> &StandardFlags {
         &self.standard_flags
+    }
+
+    pub fn command_matches(&self) -> &CommandMatches {
+        &self.command_matches
     }
 
     pub fn emit_toml(&self) -> Result<String, LccpError> {
@@ -268,6 +626,17 @@ impl ResolvedConfig {
     }
 }
 
+impl ResolvedConfig {
+    fn empty(command_name: impl Into<String>) -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            warnings: Vec::new(),
+            standard_flags: StandardFlags::default(),
+            command_matches: CommandMatches::new(command_name),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolveOptions {
     pub cwd: PathBuf,
@@ -294,6 +663,7 @@ pub struct Resolver {
     schema: BTreeMap<String, OptionSpec>,
     flag_index: BTreeMap<String, String>,
     defaults: BTreeMap<String, Value>,
+    root_command: CommandSpec,
 }
 
 impl Resolver {
@@ -305,6 +675,7 @@ impl Resolver {
         validate_app_name(&app_name)?;
 
         Ok(Self {
+            root_command: CommandSpec::new(app_name.clone())?,
             app_name,
             executable_path: executable_path.into(),
             schema: BTreeMap::new(),
@@ -354,6 +725,37 @@ impl Resolver {
         )
     }
 
+    pub fn command(&self) -> &CommandSpec {
+        &self.root_command
+    }
+
+    pub fn command_mut(&mut self) -> &mut CommandSpec {
+        &mut self.root_command
+    }
+
+    pub fn render_help(&self) -> String {
+        self.render_help_for::<&str, Vec<&str>>(Vec::new())
+            .expect("root command always exists")
+    }
+
+    pub fn render_help_for<S, I>(&self, path: I) -> Result<String, LccpError>
+    where
+        S: AsRef<str>,
+        I: IntoIterator<Item = S>,
+    {
+        let path: Vec<String> = path
+            .into_iter()
+            .map(|item| item.as_ref().to_string())
+            .collect();
+        let command = self.command_for_path(&path)?;
+        Ok(render_help_text(
+            &self.app_name,
+            command,
+            &path,
+            self.schema.values().collect(),
+        ))
+    }
+
     pub fn resolve<I, S>(&self, argv: I) -> Result<ResolvedConfig, LccpError>
     where
         I: IntoIterator<Item = S>,
@@ -372,8 +774,9 @@ impl Resolver {
         S: AsRef<str>,
     {
         let parsed = self.parse_argv(argv)?;
-        let mut resolved = ResolvedConfig::default();
+        let mut resolved = ResolvedConfig::empty(self.root_command.name.clone());
         resolved.standard_flags = parsed.standard_flags.clone();
+        resolved.command_matches = self.parse_command_matches(&parsed.remaining_args)?;
 
         for (key, value) in &self.defaults {
             resolved.apply_leaf(
@@ -547,6 +950,186 @@ impl Resolver {
         Ok(resolved)
     }
 
+    fn command_for_path(&self, path: &[String]) -> Result<&CommandSpec, LccpError> {
+        let mut current = &self.root_command;
+        let mut iter = path.iter();
+
+        if let Some(first) = iter.next() {
+            if first != current.name() {
+                current = current
+                    .subcommand(first)
+                    .ok_or_else(|| LccpError::UnknownCommandPath(path.join(" ")))?;
+            }
+        }
+
+        for segment in iter {
+            current = current
+                .subcommand(segment)
+                .ok_or_else(|| LccpError::UnknownCommandPath(path.join(" ")))?;
+        }
+
+        Ok(current)
+    }
+
+    fn parse_command_matches(
+        &self,
+        remaining_args: &[(usize, String)],
+    ) -> Result<CommandMatches, LccpError> {
+        let mut index = 0;
+        self.parse_command(&self.root_command, remaining_args, &mut index)
+    }
+
+    fn parse_command(
+        &self,
+        command: &CommandSpec,
+        items: &[(usize, String)],
+        index: &mut usize,
+    ) -> Result<CommandMatches, LccpError> {
+        let mut matches = CommandMatches::new(command.name().to_string());
+        let mut option_occurrences: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut positional_occurrences: BTreeMap<String, Vec<Value>> = BTreeMap::new();
+        let mut positional_index = 0usize;
+        let mut stop_parsing_options = false;
+
+        while *index < items.len() {
+            let current = &items[*index].1;
+
+            if !stop_parsing_options && current == "--" {
+                stop_parsing_options = true;
+                *index += 1;
+                continue;
+            }
+
+            if !stop_parsing_options && current == "--help" {
+                matches.help_requested = true;
+                *index += 1;
+                continue;
+            }
+
+            if !stop_parsing_options && current.starts_with("--") {
+                let stripped = current
+                    .strip_prefix("--")
+                    .expect("checked starts_with(\"--\") above");
+                let (flag, inline_value) = split_flag_value(stripped);
+                let Some(option_name) = command.flag_index.get(flag).cloned() else {
+                    return Err(LccpError::UnknownFlag(format!("--{flag}")));
+                };
+                let spec = command
+                    .options
+                    .get(&option_name)
+                    .expect("command flag index only references declared options");
+
+                let next_item = items.get(*index + 1).map(|(_, next)| next.as_str());
+                let (value, consumed_next) = if let Some(inline_value) = inline_value {
+                    (inline_value.to_string(), false)
+                } else if matches!(spec.value_type(), ValueType::Boolean)
+                    && next_item.map(should_use_implicit_bool).unwrap_or(true)
+                {
+                    ("true".to_string(), false)
+                } else if spec.repeated_values()
+                    && matches!(spec.value_type(), ValueType::Array(inner) if matches!(inner.as_ref(), ValueType::Boolean))
+                    && next_item.map(should_use_implicit_bool).unwrap_or(true)
+                {
+                    ("true".to_string(), false)
+                } else {
+                    let (next_value, consumed_next) =
+                        inline_or_next_value(None, items, *index, &format!("--{flag}"))?;
+                    (next_value, consumed_next)
+                };
+
+                option_occurrences
+                    .entry(option_name)
+                    .or_default()
+                    .push(value);
+                *index += if consumed_next { 2 } else { 1 };
+                continue;
+            }
+
+            if let Some(subcommand) = command.subcommand(current) {
+                *index += 1;
+                matches.subcommand = Some(Box::new(self.parse_command(subcommand, items, index)?));
+                break;
+            }
+
+            let Some(spec) = command.positionals.get(positional_index) else {
+                return Err(LccpError::UnexpectedPositional {
+                    command: command.name().to_string(),
+                    value: current.clone(),
+                });
+            };
+
+            let value = parse_raw_for_value_type(spec.name(), spec.value_type(), current)?;
+            positional_occurrences
+                .entry(spec.name().to_string())
+                .or_default()
+                .push(value);
+
+            if !spec.multiple_values() {
+                positional_index += 1;
+            }
+
+            *index += 1;
+        }
+
+        for spec in command.options.values() {
+            match option_occurrences.remove(spec.name()) {
+                Some(values) if spec.repeated_values() => {
+                    let element_type = spec
+                        .value_type()
+                        .repeated_element_type()
+                        .expect("repeated command options always use array value types");
+                    let parsed_values = values
+                        .iter()
+                        .map(|raw| parse_raw_for_value_type(spec.name(), element_type, raw))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    matches
+                        .options
+                        .insert(spec.name().to_string(), Value::Array(parsed_values));
+                }
+                Some(values) => {
+                    let raw = values
+                        .last()
+                        .expect("option occurrence vectors are never empty");
+                    let value = parse_raw_for_value_type(spec.name(), spec.value_type(), raw)?;
+                    matches.options.insert(spec.name().to_string(), value);
+                }
+                None if spec.required_option() => {
+                    return Err(LccpError::MissingRequiredCliOption {
+                        command: command.name().to_string(),
+                        option: spec.name().to_string(),
+                    });
+                }
+                None => {}
+            }
+        }
+
+        for spec in command.positionals() {
+            match positional_occurrences.remove(spec.name()) {
+                Some(values) if spec.multiple_values() => {
+                    matches
+                        .positionals
+                        .insert(spec.name().to_string(), Value::Array(values));
+                }
+                Some(values) => {
+                    let value = values
+                        .into_iter()
+                        .next()
+                        .expect("positional occurrence vectors are never empty");
+                    matches.positionals.insert(spec.name().to_string(), value);
+                }
+                None if spec.required() => {
+                    return Err(LccpError::MissingRequiredPositional {
+                        command: command.name().to_string(),
+                        positional: spec.name().to_string(),
+                    });
+                }
+                None => {}
+            }
+        }
+
+        Ok(matches)
+    }
+
     fn normalize_declared_value(&self, key: &str, value: Value) -> Result<Value, LccpError> {
         if let Some(spec) = self.schema.get(key) {
             validate_value_matches_type(key, &value, spec.value_type())?;
@@ -673,6 +1256,7 @@ impl Resolver {
         while index < items.len() {
             let (original_index, current) = (&items[index].0, &items[index].1);
             if !current.starts_with("--") {
+                parsed.remaining_args.push(items[index].clone());
                 index += 1;
                 continue;
             }
@@ -721,27 +1305,24 @@ impl Resolver {
                 }
                 _ => {
                     let Some(key) = self.flag_index.get(flag).cloned() else {
-                        return Err(LccpError::UnknownFlag(format!("--{flag}")));
+                        parsed.remaining_args.push(items[index].clone());
+                        index += 1;
+                        continue;
                     };
                     let spec = self
                         .schema
                         .get(&key)
                         .expect("flag index only references declared schema");
+                    let next_item = items.get(index + 1).map(|(_, next)| next.as_str());
                     let (value, consumed_next) = if let Some(inline_value) = inline_value {
                         (inline_value.to_string(), false)
                     } else if matches!(spec.value_type(), ValueType::Boolean)
-                        && items
-                            .get(index + 1)
-                            .map(|(_, next)| next.starts_with("--"))
-                            .unwrap_or(true)
+                        && next_item.map(should_use_implicit_bool).unwrap_or(true)
                     {
                         ("true".to_string(), false)
                     } else if spec.repeated_cli()
                         && matches!(spec.value_type(), ValueType::Array(inner) if matches!(inner.as_ref(), ValueType::Boolean))
-                        && items
-                            .get(index + 1)
-                            .map(|(_, next)| next.starts_with("--"))
-                            .unwrap_or(true)
+                        && next_item.map(should_use_implicit_bool).unwrap_or(true)
                     {
                         ("true".to_string(), false)
                     } else {
@@ -792,14 +1373,36 @@ pub enum LccpError {
     InvalidAppName(String),
     #[error("invalid canonical key `{0}`")]
     InvalidCanonicalKey(String),
+    #[error("invalid command name `{0}`")]
+    InvalidCommandName(String),
+    #[error("invalid argument name `{0}`")]
+    InvalidArgumentName(String),
+    #[error("invalid long flag name `--{0}`")]
+    InvalidLongFlag(String),
     #[error("duplicate option declaration for `{0}`")]
     DuplicateOption(String),
+    #[error("duplicate CLI option declaration for `{0}`")]
+    DuplicateCliOption(String),
     #[error("duplicate explicit flag `--{0}`")]
     DuplicateFlag(String),
+    #[error("duplicate positional declaration for `{0}`")]
+    DuplicatePositional(String),
+    #[error("invalid positional layout for command `{0}`")]
+    InvalidPositionalLayout(String),
+    #[error("duplicate subcommand declaration for `{0}`")]
+    DuplicateSubcommand(String),
     #[error("missing value after `{0}`")]
     MissingArgumentValue(String),
     #[error("unknown explicit flag `{0}`")]
     UnknownFlag(String),
+    #[error("unknown command path `{0}`")]
+    UnknownCommandPath(String),
+    #[error("missing required option `{option}` for command `{command}`")]
+    MissingRequiredCliOption { command: String, option: String },
+    #[error("missing required positional `{positional}` for command `{command}`")]
+    MissingRequiredPositional { command: String, positional: String },
+    #[error("unexpected positional `{value}` for command `{command}`")]
+    UnexpectedPositional { command: String, value: String },
     #[error("invalid --set syntax `{0}`")]
     InvalidSetSyntax(String),
     #[error("unsupported configuration file format for `{0}`")]
@@ -840,6 +1443,7 @@ struct ParsedCli {
     sets: Vec<SetArg>,
     explicit_scalar_flags: Vec<ScalarNamedFlagEvent>,
     explicit_repeated_flags: BTreeMap<String, RepeatedNamedFlagEvent>,
+    remaining_args: Vec<(usize, String)>,
 }
 
 #[derive(Debug, Clone)]
@@ -907,6 +1511,44 @@ fn validate_app_name(app_name: &str) -> Result<(), LccpError> {
     Ok(())
 }
 
+fn validate_command_name(name: &str) -> Result<(), LccpError> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+    {
+        return Err(LccpError::InvalidCommandName(name.to_string()));
+    }
+
+    Ok(())
+}
+
+fn validate_argument_name(name: &str) -> Result<(), LccpError> {
+    if name.is_empty()
+        || !name
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
+    {
+        return Err(LccpError::InvalidArgumentName(name.to_string()));
+    }
+
+    Ok(())
+}
+
+fn validate_long_flag(flag: &str) -> Result<(), LccpError> {
+    if flag.is_empty()
+        || flag.starts_with('-')
+        || flag.ends_with('-')
+        || !flag
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+    {
+        return Err(LccpError::InvalidLongFlag(flag.to_string()));
+    }
+
+    Ok(())
+}
+
 fn validate_canonical_key(key: &str) -> Result<(), LccpError> {
     if key.is_empty() {
         return Err(LccpError::InvalidCanonicalKey(key.to_string()));
@@ -929,11 +1571,158 @@ fn canonical_key_to_flag(key: &str) -> String {
     key.replace('.', "-").replace('_', "-")
 }
 
+fn render_help_text(
+    app_name: &str,
+    command: &CommandSpec,
+    path: &[String],
+    config_options: Vec<&OptionSpec>,
+) -> String {
+    let mut out = String::new();
+    let command_path = if path.is_empty() {
+        app_name.to_string()
+    } else if path.first().map(String::as_str) == Some(app_name) {
+        path.join(" ")
+    } else {
+        format!("{app_name} {}", path.join(" "))
+    };
+
+    out.push_str(&format!("Usage: {command_path}"));
+    if !config_options.is_empty() || !command.options().is_empty() {
+        out.push_str(" [OPTIONS]");
+    }
+    if !command.subcommands().is_empty() {
+        out.push_str(" [SUBCOMMAND]");
+    }
+    for positional in command.positionals() {
+        if positional.required() {
+            out.push_str(&format!(" <{}>", positional.name()));
+        } else {
+            out.push_str(&format!(" [{}]", positional.name()));
+        }
+        if positional.multiple_values() {
+            out.push_str("...");
+        }
+    }
+    out.push('\n');
+
+    if let Some(help) = command.help() {
+        out.push('\n');
+        out.push_str(help);
+        out.push('\n');
+    }
+
+    out.push_str("\nStandard Options:\n");
+    out.push_str("  --help                   Show help for this command\n");
+    out.push_str("  --config <PATH>          Load an additional JSON or TOML config file\n");
+    out.push_str("  --set <KEY=VALUE>        Apply a generic configuration override\n");
+    out.push_str("  --print-default-config   Emit default configuration as TOML\n");
+    out.push_str("  --print-config           Emit resolved configuration as TOML\n");
+    out.push_str("  --debug-config           Emit resolved configuration with provenance\n");
+
+    if !config_options.is_empty() {
+        out.push_str("\nConfiguration Options:\n");
+        for spec in config_options {
+            let value_name = spec
+                .value_name()
+                .map(str::to_string)
+                .unwrap_or_else(|| default_value_name(spec.value_type()));
+            let suffix = if matches!(spec.value_type(), ValueType::Boolean) {
+                String::new()
+            } else {
+                format!(" <{value_name}>")
+            };
+            out.push_str(&format!("  --{}{}", spec.long_flag(), suffix));
+            if let Some(help) = spec.help() {
+                out.push_str(&pad_help_column(
+                    help,
+                    24 + suffix.len() + spec.long_flag().len(),
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
+    if !command.options().is_empty() {
+        out.push_str("\nOptions:\n");
+        for spec in command.options().values() {
+            let value_name = spec
+                .value_name()
+                .map(str::to_string)
+                .unwrap_or_else(|| default_value_name(spec.value_type()));
+            let suffix = if matches!(spec.value_type(), ValueType::Boolean) {
+                String::new()
+            } else {
+                format!(" <{value_name}>")
+            };
+            out.push_str(&format!("  --{}{}", spec.long_flag(), suffix));
+            if let Some(help) = spec.help() {
+                out.push_str(&pad_help_column(
+                    help,
+                    24 + suffix.len() + spec.long_flag().len(),
+                ));
+            }
+            out.push('\n');
+        }
+    }
+
+    if !command.positionals().is_empty() {
+        out.push_str("\nPositionals:\n");
+        for spec in command.positionals() {
+            let mut name = spec.name().to_string();
+            if spec.multiple_values() {
+                name.push_str("...");
+            }
+            out.push_str(&format!("  {name}"));
+            if let Some(help) = spec.help() {
+                out.push_str(&pad_help_column(help, 2 + name.len()));
+            }
+            out.push('\n');
+        }
+    }
+
+    if !command.subcommands().is_empty() {
+        out.push_str("\nSubcommands:\n");
+        for subcommand in command.subcommands().values() {
+            out.push_str(&format!("  {}", subcommand.name()));
+            if let Some(help) = subcommand.help() {
+                out.push_str(&pad_help_column(help, 2 + subcommand.name().len()));
+            }
+            out.push('\n');
+        }
+    }
+
+    out
+}
+
+fn default_value_name(value_type: &ValueType) -> String {
+    match value_type {
+        ValueType::String => "STRING".to_string(),
+        ValueType::Integer => "INTEGER".to_string(),
+        ValueType::Float => "FLOAT".to_string(),
+        ValueType::Boolean => "BOOL".to_string(),
+        ValueType::Array(inner) => default_value_name(inner),
+    }
+}
+
+fn pad_help_column(help: &str, current_width: usize) -> String {
+    let padding = if current_width >= 24 {
+        "  ".to_string()
+    } else {
+        " ".repeat(24 - current_width)
+    };
+    format!("{padding}{help}")
+}
+
 fn split_flag_value(flag: &str) -> (&str, Option<&str>) {
     match flag.split_once('=') {
         Some((name, value)) => (name, Some(value)),
         None => (flag, None),
     }
+}
+
+fn should_use_implicit_bool(next: &str) -> bool {
+    next.starts_with("--")
+        || !matches!(next, "true" | "TRUE" | "True" | "false" | "FALSE" | "False")
 }
 
 fn inline_or_next_value(

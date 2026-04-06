@@ -6,9 +6,22 @@ This crate implements the behavior defined in https://github.com/lobbyseago/lccp
 
 ## Version
 
-Current crate version: `0.1.0`
+Current crate version: `0.2.0`
 
 The vendored upstream specification copy is stored under [`spec/upstream/`](./spec/upstream/) and versioned by upstream source commit because the specification repository does not yet publish release tags.
+
+## API
+
+A concise Rust-specific API specification is checked in at [`docs/api.md`](./docs/api.md).
+
+That document covers:
+
+- the resolver lifecycle
+- configuration schema declaration
+- runtime-configurable app CLI options
+- positional arguments and subcommands
+- help rendering
+- resolved command match access
 
 ## Example
 

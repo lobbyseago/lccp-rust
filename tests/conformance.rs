@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use lccp::{LccpError, OptionSpec, ResolveOptions, Resolver, SourceKind, ValueType};
+use lccp::{
+    CliOptionSpec, CommandSpec, LccpError, OptionSpec, PositionalSpec, ResolveOptions, Resolver,
+    SourceKind, ValueType,
+};
 use serde_json::{json, Value};
 use tempfile::TempDir;
 
@@ -54,7 +57,11 @@ impl Harness {
 fn resolver(executable_path: &Path) -> Resolver {
     let mut resolver = Resolver::new("example-app", executable_path).unwrap();
     resolver
-        .declare_option(OptionSpec::new("server.host", ValueType::String).unwrap())
+        .declare_option(
+            OptionSpec::new("server.host", ValueType::String)
+                .unwrap()
+                .with_help("Set the server host"),
+        )
         .unwrap();
     resolver
         .declare_option(OptionSpec::new("server.port", ValueType::Integer).unwrap())
@@ -514,4 +521,161 @@ fn invalid_app_names_and_keys_are_rejected() {
         .set_default("bad-key", Value::String("x".to_string()))
         .unwrap_err();
     assert!(matches!(error, LccpError::InvalidCanonicalKey(_)));
+}
+
+#[test]
+fn app_defined_options_and_positionals_are_parsed_by_the_library() {
+    let harness = Harness::new();
+    let mut resolver = resolver(&harness.executable_path);
+    resolver
+        .command_mut()
+        .add_option(
+            CliOptionSpec::new("verbose", "verbose", ValueType::Boolean)
+                .unwrap()
+                .with_help("Enable verbose logging"),
+        )
+        .unwrap();
+    resolver
+        .command_mut()
+        .add_positional(
+            PositionalSpec::new("input", ValueType::String)
+                .unwrap()
+                .with_help("Input file"),
+        )
+        .unwrap();
+
+    let resolved = resolver
+        .resolve_with(
+            ["example-app", "--verbose", "input.txt"],
+            harness.resolve_options(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        resolved.command_matches().option("verbose").cloned(),
+        Some(json!(true))
+    );
+    assert_eq!(
+        resolved.command_matches().positional("input").cloned(),
+        Some(json!("input.txt"))
+    );
+}
+
+#[test]
+fn subcommands_and_their_positionals_are_parsed_without_a_second_parser() {
+    let harness = Harness::new();
+    let mut resolver = resolver(&harness.executable_path);
+
+    let mut serve = CommandSpec::new("serve")
+        .unwrap()
+        .with_help("Run the server");
+    serve
+        .add_option(
+            CliOptionSpec::new("daemonize", "daemonize", ValueType::Boolean)
+                .unwrap()
+                .with_help("Run in the background"),
+        )
+        .unwrap();
+    serve
+        .add_positional(
+            PositionalSpec::new("profile", ValueType::String)
+                .unwrap()
+                .with_help("Profile name"),
+        )
+        .unwrap();
+    resolver.command_mut().add_subcommand(serve).unwrap();
+
+    let resolved = resolver
+        .resolve_with(
+            ["example-app", "serve", "prod", "--daemonize"],
+            harness.resolve_options(),
+        )
+        .unwrap();
+
+    let subcommand = resolved.command_matches().subcommand().unwrap();
+    assert_eq!(subcommand.command_name(), "serve");
+    assert_eq!(
+        subcommand.positional("profile").cloned(),
+        Some(json!("prod"))
+    );
+    assert_eq!(subcommand.option("daemonize").cloned(), Some(json!(true)));
+}
+
+#[test]
+fn help_text_includes_config_options_app_options_positionals_and_subcommands() {
+    let harness = Harness::new();
+    let mut resolver = resolver(&harness.executable_path);
+    resolver
+        .command_mut()
+        .add_option(
+            CliOptionSpec::new("verbose", "verbose", ValueType::Boolean)
+                .unwrap()
+                .with_help("Enable verbose logging"),
+        )
+        .unwrap();
+    resolver
+        .command_mut()
+        .add_positional(
+            PositionalSpec::new("input", ValueType::String)
+                .unwrap()
+                .optional()
+                .with_help("Optional input file"),
+        )
+        .unwrap();
+    resolver
+        .command_mut()
+        .add_subcommand(
+            CommandSpec::new("serve")
+                .unwrap()
+                .with_help("Run the server"),
+        )
+        .unwrap();
+
+    let root_help = resolver.render_help();
+    assert!(root_help.contains("Standard Options:"));
+    assert!(root_help.contains("Configuration Options:"));
+    assert!(root_help.contains("--server-host"));
+    assert!(root_help.contains("Set the server host"));
+    assert!(root_help.contains("Options:"));
+    assert!(root_help.contains("--verbose"));
+    assert!(root_help.contains("Positionals:"));
+    assert!(root_help.contains("input"));
+    assert!(root_help.contains("Subcommands:"));
+    assert!(root_help.contains("serve"));
+
+    let serve_help = resolver.render_help_for(["serve"]).unwrap();
+    assert!(serve_help.contains("Usage: example-app serve"));
+    assert!(serve_help.contains("Run the server"));
+}
+
+#[test]
+fn unknown_app_flags_and_help_requests_are_reported_by_the_command_model() {
+    let harness = Harness::new();
+    let mut resolver = resolver(&harness.executable_path);
+
+    let mut serve = CommandSpec::new("serve").unwrap();
+    serve
+        .add_option(
+            CliOptionSpec::new("daemonize", "daemonize", ValueType::Boolean)
+                .unwrap()
+                .with_help("Run in the background"),
+        )
+        .unwrap();
+    resolver.command_mut().add_subcommand(serve).unwrap();
+
+    let error = resolver
+        .resolve_with(["example-app", "--unknown"], harness.resolve_options())
+        .unwrap_err();
+    assert!(matches!(error, LccpError::UnknownFlag(_)));
+
+    let resolved = resolver
+        .resolve_with(
+            ["example-app", "serve", "--help"],
+            harness.resolve_options(),
+        )
+        .unwrap();
+    assert_eq!(
+        resolved.command_matches().help_command_path(),
+        Some(vec!["example-app".to_string(), "serve".to_string()])
+    );
 }
