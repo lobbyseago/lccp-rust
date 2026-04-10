@@ -1,6 +1,6 @@
 [package]
 name = "lccp"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "Lobster Configuration and Command-Line Parsing (LCCP)"
 readme = "README.md"

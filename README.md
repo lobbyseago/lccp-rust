@@ -6,9 +6,11 @@ This crate implements the behavior defined in https://github.com/lobbyseago/lccp
 
 ## Version
 
-Current crate version: `0.2.0`
+Current crate version: `0.3.0`
 
 The vendored upstream specification copy is stored under [`spec/upstream/`](./spec/upstream/) and versioned by upstream source commit because the specification repository does not yet publish release tags.
+
+Level 4 user configuration is discovered from `~/.<app_name>/config.json` and `~/.<app_name>/config.toml`.
 
 ## API
 
@@ -18,6 +20,7 @@ That document covers:
 
 - the resolver lifecycle
 - configuration schema declaration
+- user-level configuration discovery
 - runtime-configurable app CLI options
 - positional arguments and subcommands
 - help rendering

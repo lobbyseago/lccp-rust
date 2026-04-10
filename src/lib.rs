@@ -818,7 +818,7 @@ impl Resolver {
         )?;
 
         if let Some(home_dir) = &options.home_dir {
-            let config_dir = home_dir.join(".config").join(&self.app_name);
+            let config_dir = home_dir.join(format!(".{}", self.app_name));
             self.load_discovered_level(
                 &mut resolved,
                 SourceKind::UserFile,

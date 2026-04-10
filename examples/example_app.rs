@@ -59,7 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_file(&root.join("system/example-app.json"))?;
     print_file(&root.join("system/example-app.toml"))?;
     print_file(&root.join("install-root/etc/example-app.toml"))?;
-    print_file(&root.join("home/.config/example-app/config.toml"))?;
+    print_file(&root.join("home/.example-app/config.toml"))?;
     print_file(&root.join("cwd/example-app.json"))?;
     print_file(&root.join("cwd/cli-config.toml"))?;
 

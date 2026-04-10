@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-04-10
+- Updated level 4 user configuration discovery to use `~/.<app_name>/config.{json,toml}` instead of `~/.config/<app_name>/...`.
+- Updated vendored specification content to the upstream source commit that defines the new user-directory layout.
+- Updated examples, tests, and reference output to use the application-owned hidden home-directory path.
+
 ## 0.2.0 - 2026-04-06
 - Added a runtime-configurable application command model so consumers can declare app-specific flags, positionals, subcommands, and help text inside `lccp`.
 - Added parsed command match access on resolved results.

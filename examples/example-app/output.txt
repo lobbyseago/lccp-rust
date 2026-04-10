@@ -10,7 +10,7 @@ examples/example-app/install-root/etc/example-app.toml
 [server]
 host = "install.example"
 
-examples/example-app/home/.config/example-app/config.toml
+examples/example-app/home/.example-app/config.toml
 [server]
 host = "user.example"
 
@@ -83,7 +83,7 @@ server.host = "explicit.example"
     2. system_file @ examples/example-app/system/example-app.json => "system-json.example"
     3. system_file @ examples/example-app/system/example-app.toml => "system-toml.example"
     4. install_file @ examples/example-app/install-root/etc/example-app.toml => "install.example"
-    5. user_file @ examples/example-app/home/.config/example-app/config.toml => "user.example"
+    5. user_file @ examples/example-app/home/.example-app/config.toml => "user.example"
     6. working_dir_file @ examples/example-app/cwd/example-app.json => "cwd.example"
     7. environment @ EXAMPLE_APP_SERVER_HOST => "env.example"
     8. cli_config_file @ examples/example-app/cwd/cli-config.toml => "cli-config.example"

@@ -29,7 +29,7 @@ impl Harness {
         let executable_path = install_root.join("bin").join("example-app");
 
         fs::create_dir_all(&system_dir).unwrap();
-        fs::create_dir_all(home_dir.join(".config").join("example-app")).unwrap();
+        fs::create_dir_all(home_dir.join(".example-app")).unwrap();
         fs::create_dir_all(&cwd).unwrap();
         fs::create_dir_all(install_root.join("bin")).unwrap();
         fs::create_dir_all(install_root.join("etc")).unwrap();
@@ -137,7 +137,7 @@ host = "install.example"
 "#,
     );
     write_file(
-        harness.home_dir.join(".config/example-app/config.toml"),
+        harness.home_dir.join(".example-app/config.toml"),
         r#"[server]
 host = "user.example"
 "#,
@@ -250,7 +250,7 @@ fn object_merge_is_recursive_and_querying_parent_keys_returns_subtrees() {
     let resolver = resolver(&harness.executable_path);
 
     write_file(
-        harness.home_dir.join(".config/example-app/config.toml"),
+        harness.home_dir.join(".example-app/config.toml"),
         r#"[server]
 host = "merged.example"
 "#,

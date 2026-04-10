@@ -13,6 +13,15 @@ The library has two responsibilities:
 
 Applications should not layer a second command-line parser on top of `lccp`.
 
+## Configuration Discovery
+
+Level 4 user configuration is discovered from the application-owned hidden directory in the user home directory:
+
+- `~/.<app_name>/config.json`
+- `~/.<app_name>/config.toml`
+
+This directory may also contain other application-specific files beyond configuration.
+
 ## Primary Types
 
 ### `Resolver`
